@@ -19,16 +19,16 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/fabric8io/gitcontroller/pkg/version"
+	"github.com/fabric8io/gitcollector/pkg/version"
 )
 
 func init() {
 	var versionCmd = &cobra.Command{
 		Use:   "version",
-		Short: "Print the version of gitcontroller.",
-		Long:  `Print the version of gitcontroller.`,
+		Short: "Print the version of gitcollector.",
+		Long:  `Print the version of gitcollector.`,
 		Run: func(command *cobra.Command, args []string) {
-			fmt.Println("gitcontroller version:", version.GetVersion())
+			fmt.Println("gitcollector version:", version.GetVersion())
 		},
 	}
 	RootCmd.AddCommand(versionCmd)

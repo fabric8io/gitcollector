@@ -23,11 +23,11 @@ import (
 const ()
 
 var RootCmd = &cobra.Command{
-	Use:   "gitcontroller",
-	Short: "gitcontroller is a Function as a Service (Lambda) style programming model for Kubernetes",
+	Use:   "gitcollector",
+	Short: "gitcollector is a Function as a Service (Lambda) style programming model for Kubernetes",
 	Long: `Funktion lets you develop complex applications using Functions and then use Flows to bind those functions to any event source (over 200 event sources and connectors supported) and run and scale your functions on top of kubernetes.
 
-For more documentation please see: https://gitcontroller.fabric8.io/`,
+For more documentation please see: https://gitcollector.fabric8.io/`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) == 0 {
 			cmd.Help()

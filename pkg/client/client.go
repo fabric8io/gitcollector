@@ -16,7 +16,7 @@
 package client
 
 import (
-	"github.com/fabric8io/gitcontroller/util"
+	"github.com/fabric8io/gitcollector/util"
 	oclient "github.com/openshift/origin/pkg/client"
 	"k8s.io/kubernetes/pkg/client/restclient"
 	client "k8s.io/kubernetes/pkg/client/unversioned"

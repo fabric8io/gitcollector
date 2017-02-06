@@ -1,4 +1,4 @@
-package: github.com/fabric8io/gitcontroller
+package: github.com/fabric8io/gitcollector
 import:
 - package: github.com/daviddengcn/go-colortext
 - package: github.com/openshift/origin
