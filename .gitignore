@@ -1,0 +1,7 @@
+gitcollector
+vendor
+/build
+/release
+*.iml
+.idea
+.DS_Store
