@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/fabric8io/gitcontroller/cmd"
+	"github.com/fabric8io/gitcollector/cmd"
 )
 
 func Main() int {
