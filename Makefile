@@ -17,7 +17,7 @@
 SHELL := /bin/bash
 NAME := gitcollector
 GO := GO15VENDOREXPERIMENT=1 go
-VERSION := $(shell cat version/VERSION)
+VERSION := $(shell cat pkg/version/VERSION)
 OPENSHIFT_TAG := $(shell cat .openshift-version)
 ROOT_PACKAGE := $(shell $(GO) list .)
 GO_VERSION := $(shell $(GO) version | sed -e 's/^[^0-9.]*\([0-9.]*\).*/\1/')
@@ -39,7 +39,7 @@ build: *.go */*.go fmt
 	CGO_ENABLED=0 $(GO) build $(BUILDFLAGS) -o build/$(NAME) $(NAME).go
 
 test:
-	CGO_ENABLED=0 $(GO) test github.com/fabric8io/gitcollector/cmd
+	CGO_ENABLED=0 $(GO) test github.com/fabric8io/gitcollector/pkg/watcher
 
 install: *.go */*.go
 	GOBIN=${GOPATH}/bin $(GO) install $(BUILDFLAGS) $(NAME).go

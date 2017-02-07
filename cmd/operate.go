@@ -25,36 +25,51 @@ import (
 	"github.com/fabric8io/gitcollector/pkg/util"
 	"github.com/fabric8io/gitcollector/pkg/watcher"
 	"github.com/spf13/cobra"
-	//flag "github.com/spf13/pflag"
+
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 )
 
 func init() {
-	RootCmd.AddCommand(versionCmd)
+	RootCmd.AddCommand(newOperateCommand())
 }
 
-var versionCmd = &cobra.Command{
-	Use:   "operate",
-	Short: "Runs the gitcollector operator",
-	Long:  `This command will startup the operator for the git collector`,
-	RunE:  operateCommand,
+func newOperateCommand() *cobra.Command {
+	p := &watcher.WatchFlags{}
+	cmd := &cobra.Command{
+		Use:   "operate",
+		Short: "Runs the gitcollector operator",
+		Long:  `This command will startup the operator for the git collector`,
+		Run: func(cmd *cobra.Command, args []string) {
+			err := operateCommand(cmd, args, p)
+			handleError(err)
+		},
+	}
+	f := cmd.Flags()
+	f.StringVarP(&p.WorkDir, "workdir", "w", "./workdir", "the directory to store work files like git clones")
+	f.StringVarP(&p.Namespace, "namespace", "n", "", "the namespace to watch")
+	f.BoolVarP(&p.ExternalGitUrl, "externalGitUri", "x", false, "should we use the external git URLs when cloning")
+	return cmd
 }
 
-func operateCommand(cmd *cobra.Command, args []string) error {
+func operateCommand(cmd *cobra.Command, args []string, p *watcher.WatchFlags) error {
 	fmt.Println("gitcollector operator is starting")
+
+	initSchema()
 
 	f := cmdutil.NewFactory(nil)
 	f.BindFlags(cmd.PersistentFlags())
 
 	c, cfg := client.NewClient(f)
-	ns, _, err := f.DefaultNamespace()
-	if err != nil {
-		return err
-	}
-
 	oc, _ := client.NewOpenShiftClient(cfg)
 
-	bw := watcher.New(c, oc, ns)
+	if len(p.Namespace) == 0 {
+		n, _, err := f.DefaultNamespace()
+		if err != nil {
+			return err
+		}
+		p.Namespace = n
+	}
+	bw := watcher.New(c, oc, p)
 
 	stopc := make(chan struct{})
 	errc := make(chan error)
@@ -62,7 +77,7 @@ func operateCommand(cmd *cobra.Command, args []string) error {
 
 	wg.Add(1)
 	go func() {
-		if err := bw.Run(); err != nil {
+		if err := bw.Run(stopc); err != nil {
 			errc <- err
 		}
 		wg.Done()
@@ -73,11 +88,11 @@ func operateCommand(cmd *cobra.Command, args []string) error {
 	select {
 	case <-term:
 		fmt.Fprintln(os.Stderr)
-		util.Info("Received SIGTERM, exiting gracefully.../n")
+		util.Info("Received SIGTERM, exiting gracefully...\n")
 		close(stopc)
 		wg.Wait()
 	case err := <-errc:
-		util.Warnf("Unexpected error received: %v/n", err)
+		util.Warnf("Unexpected error received: %v\n", err)
 		close(stopc)
 		wg.Wait()
 		return err

@@ -2,7 +2,7 @@ package: github.com/fabric8io/gitcollector
 import:
 - package: github.com/daviddengcn/go-colortext
 - package: github.com/openshift/origin
-  version: v1.3.0
+  version: v1.4.1
   subpackages:
   - pkg/client
   - pkg/cmd/admin/policy
@@ -12,6 +12,8 @@ import:
   - pkg/template/api
   - pkg/template/api/v1
   - pkg/template/generator
+- package: github.com/docker/docker
+  version: v1.11.2
 - package: github.com/spf13/cobra
 - package: github.com/spf13/pflag
 - package: github.com/golang/glog
@@ -23,7 +25,7 @@ import:
   repo: https://github.com/golang/crypto.git
   vcs: git
 - package: k8s.io/kubernetes
-  version: 52492b4bff99ef3b8ca617d385a3ff0612f9402d
+  version: a9e9cf3b407c1d315686c452bdb918c719c3ea6e
   repo: git://github.com/openshift/kubernetes.git
   vcs: git
   subpackages:
@@ -39,12 +41,6 @@ import:
   - pkg/util
 - package: github.com/Sirupsen/logrus
   version: ^0.10.0
-- package: github.com/coreos/pkg
-  subpackages:
-  - capnslog
-- package: github.com/coreos/go-systemd
-  subpackages:
-  - journal
 - package: speter.net/go/exp/math/dec/inf
   repo: git@github.com:go-inf/inf.git
   vcs: git
@@ -54,13 +50,8 @@ import:
 - package: github.com/pmezard/go-difflib
   subpackages:
   - difflib
-- package: github.com/pkg/browser
-- package: github.com/jimmidyson/minishift
-- package: github.com/gonum/graph/concrete
-  version: bde6d0fbd9dec5a997e906611fe0364001364c41
-- package: github.com/docker/docker
-  version: 0f5c9d301b9b1cca66b3ea0f9dec3b5317d3686d
-- package: github.com/imdario/mergo
-  version: 6633656539c1639d9d78127b7d47c622b5d7b6dc
 - package: github.com/daviddengcn/go-colortext
 - package: github.com/google/go-github
+- package: github.com/src-d/go-git
+  version: v4.0.0-rc9
+- package: github.com/emicklei/go-restful

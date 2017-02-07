@@ -89,7 +89,7 @@ func Failuref(msg string, args ...interface{}) {
 // then press enter. It has fuzzy matching, so "y", "Y", "yes", "YES", and "Yes" all count as
 // confirmations. If the input is not recognized, it will ask again. The function does not return
 // until it gets a valid response from the user. Typically, you should use fmt to print out a question
-// before calling askForConfirmation. E.g. fmt.Println("WARNING: Are you sure? (yes/no)")
+// before calling askForConfirmation. E.g. fmt.Println("WARNING: Are you sure? (yes\no)")
 func AskForConfirmation(def bool) bool {
 	var response string
 	fmt.Scanln(&response)
