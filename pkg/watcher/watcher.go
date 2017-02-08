@@ -4,18 +4,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"time"
 
 	"github.com/fabric8io/gitcollector/pkg/util"
-	"github.com/google/go-github/github"
-	"github.com/src-d/go-git"
-	"k8s.io/kubernetes/pkg/watch"
-
 	buildapi "github.com/openshift/origin/pkg/build/api"
 	oclient "github.com/openshift/origin/pkg/client"
 	kapi "k8s.io/kubernetes/pkg/api"
 	k8sclient "k8s.io/kubernetes/pkg/client/unversioned"
+	"k8s.io/kubernetes/pkg/watch"
 )
 
 const (
@@ -23,6 +19,9 @@ const (
 	afterEventSleepDelay = 1 * time.Second
 
 	externalGitUri = "fabric8.io/git-clone-url"
+
+	useGithub = false
+	useGoGit  = false
 )
 
 type WatchFlags struct {
@@ -31,24 +30,16 @@ type WatchFlags struct {
 	ExternalGitUrl bool
 }
 
-type BuildConfigWatch struct {
-	watcher     *Watcher
-	buildConfig *buildapi.BuildConfig
-	workDir     string
-}
-
 type Watcher struct {
 	kubeClient *k8sclient.Client
 	osClient   *oclient.Client
 	watch      *watch.Interface
 	flags      *WatchFlags
 
-	namespace              string
-	workDir                string
-	currentBuildConfigName string
-	currentPosition        int
-	buildConfigs           map[string]*BuildConfigWatch
-	buildConfigNames       []string
+	namespace       string
+	workDir         string
+	currentPosition int
+	collectors      []*BuildConfigCollector
 }
 
 func New(c *k8sclient.Client, oc *oclient.Client, flags *WatchFlags) Watcher {
@@ -58,13 +49,13 @@ func New(c *k8sclient.Client, oc *oclient.Client, flags *WatchFlags) Watcher {
 		util.Errorf("Unable to create work directory %s due to: %v\n", workDir, err)
 	}
 	return Watcher{
-		kubeClient:       c,
-		osClient:         oc,
-		flags:            flags,
-		namespace:        flags.Namespace,
-		workDir:          workDir,
-		buildConfigs:     map[string]*BuildConfigWatch{},
-		buildConfigNames: []string{},
+		kubeClient:      c,
+		osClient:        oc,
+		flags:           flags,
+		namespace:       flags.Namespace,
+		workDir:         workDir,
+		collectors:      []*BuildConfigCollector{},
+		currentPosition: -1,
 	}
 }
 
@@ -122,98 +113,91 @@ func (b *Watcher) Run(stopCh <-chan struct{}) error {
 }
 
 func (b *Watcher) processNextBuildConfig() {
-	name, pos := nextName(b.currentBuildConfigName, b.currentPosition, b.buildConfigNames)
-	b.currentBuildConfigName = name
-	b.currentPosition = pos
-	if len(name) == 0 {
+	size := len(b.collectors)
+	if size == 0 {
 		time.Sleep(noProjectSleepDelay)
 		return
 	}
-	buildWatch := b.buildConfigs[name]
-	if buildWatch == nil {
-		util.Warnf("No BuildWatch exists for %s\n", name)
-		return
+	pos := b.currentPosition + 1
+	if pos >= size {
+		pos = 0
 	}
+	b.currentPosition = pos
+	buildWatch := b.collectors[pos]
 	if buildWatch.Process() > 0 {
 		time.Sleep(afterEventSleepDelay)
 	}
 }
 
-// nextName returns the next name in order given the current name
-// if no name selected then return the first otherwise return the next one
-// in the list, rolling around to the first one again
-func nextName(current string, pos int, names []string) (string, int) {
-	if len(names) == 0 {
-		return "", 0
-	}
-	if len(current) == 0 {
-		return names[0], 0
-	}
-	size := len(names)
-	for i := 0; i < size; i++ {
-		name := names[i]
-		if current == name {
-			j := i + 1
-			if j >= size {
-				return names[0], 0
-			} else {
-				return names[j], j
-			}
-		}
-	}
-
-	// the current item was removed so lets assume the previous position to avoid
-	// weighting the early names too much
-	if pos < size {
-		return names[pos], pos
-	} else {
-		return names[0], 0
-	}
-}
-
 func (b *Watcher) addBuildConfig(bc *buildapi.BuildConfig) {
-	util.Infof("adding BuildConfig %s\n", bc.Name)
 	b.upsertBuildConfig(bc, true)
 }
 
 func (b *Watcher) modifyBuildConfig(bc *buildapi.BuildConfig) {
-	util.Infof("updating BuildConfig %s\n", bc.Name)
 	b.upsertBuildConfig(bc, false)
 }
 
 func (b *Watcher) upsertBuildConfig(bc *buildapi.BuildConfig, add bool) {
-	name := bc.Name
-	buildWatch := b.buildConfigs[name]
-	var oldBc *buildapi.BuildConfig
-	if buildWatch == nil {
-		workDir := filepath.Join(b.workDir, name)
-		err := os.MkdirAll(workDir, 0700)
-		if err != nil {
-			util.Errorf("Unable to create work directory %s due to: %v\n", workDir, err)
-			return
-		}
-		buildWatch = &BuildConfigWatch{
-			watcher:     b,
-			buildConfig: bc,
-			workDir:     workDir,
-		}
-		b.buildConfigs[bc.Name] = buildWatch
-	} else {
-		oldBc = buildWatch.buildConfig
+	message := "updating"
+	if add {
+		message = "adding"
 	}
-	buildWatch.buildConfig = bc
+	name := bc.Name
+	newGS := b.GitSource(bc)
+	if newGS == nil {
+		return
+	}
+	util.Infof("%s BuildConfig %s with source %v\n", message, name, newGS)
+	var buildWatch *BuildConfigCollector = nil
+	for _, bw := range b.collectors {
+		if name == bw.name {
+			buildWatch = bw
+			break
+		}
+	}
+	var oldBc *buildapi.BuildConfig = nil
+	if buildWatch == nil {
+		buildWatch = &BuildConfigCollector{
+			name:        name,
+			watcher:     b,
+			buildConfig: *bc,
+			workDir:     filepath.Join(b.workDir, name),
+		}
+		b.collectors = append(b.collectors, buildWatch)
+	} else {
+		oldBc = &buildWatch.buildConfig
+		buildWatch.buildConfig = *bc
+	}
 
 	if oldBc != nil {
-		if removeOldGitSource(b.GitSource(oldBc), b.GitSource(bc)) {
+		oldGS := b.GitSource(oldBc)
+		if removeOldGitSource(oldGS, newGS) {
 			// the git branch/repo has changed so lets remove the data
-			util.Infof("Git source changed for %s so lets remove old files\n", name)
+			util.Infof("Git source changed for %s so lets remove old files as its %v and was %v\n", name, newGS, oldGS)
 			buildWatch.Delete()
 		}
 
 	}
-	b.updateIndices()
 
 	// TODO lets POST to the tracker
+}
+
+func (b *Watcher) deleteBuildConfig(bc *buildapi.BuildConfig) {
+	name := bc.Name
+	util.Infof("removing BuildConfig %s\n", name)
+	for i, bw := range b.collectors {
+		if name == bw.name {
+			bw.Delete()
+			s := b.collectors
+			b.collectors = append(s[:i], s[i+1:]...)
+
+			// lets avoid missing the next item when we process things
+			if b.currentPosition >= i {
+				b.currentPosition -= 1
+			}
+			break
+		}
+	}
 }
 
 func (b *Watcher) GitSource(bc *buildapi.BuildConfig) *buildapi.GitBuildSource {
@@ -240,90 +224,12 @@ func (b *Watcher) GitSource(bc *buildapi.BuildConfig) *buildapi.GitBuildSource {
 	return nil
 }
 
-func removeOldGitSource(old, new *buildapi.GitBuildSource) bool {
-	if old == new || old == nil {
+func removeOldGitSource(old *buildapi.GitBuildSource, new *buildapi.GitBuildSource) bool {
+	if old == new || old == nil || len(old.URI) == 0 {
 		return false
 	}
 	if new == nil {
-		return true
+		return len(old.URI) > 0
 	}
 	return old.URI != new.URI || old.Ref != new.Ref
-}
-
-func (b *Watcher) deleteBuildConfig(bc *buildapi.BuildConfig) {
-	name := bc.Name
-	util.Infof("removing BuildConfig %s\n", name)
-	buildWatch := b.buildConfigs[name]
-	if buildWatch != nil {
-		delete(b.buildConfigs, name)
-		buildWatch.Delete()
-		b.updateIndices()
-	}
-}
-
-func (b *Watcher) updateIndices() {
-	names := []string{}
-	for name, _ := range b.buildConfigs {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	b.buildConfigNames = names
-}
-
-// Delete removes the work directory for the given watch
-func (w *BuildConfigWatch) Delete() {
-	name := w.buildConfig.Name
-	workDir := os.RemoveAll(w.workDir)
-	err := workDir
-	if err != nil {
-		util.Warnf("Failed to remove workDir %s for BuildConfig %s due to: %v\n", workDir, name, err)
-	}
-}
-
-func (w *BuildConfigWatch) Process() int {
-	bc := w.buildConfig
-	gs := w.watcher.GitSource(bc)
-	if gs == nil {
-		return 0
-	}
-	gitDir := filepath.Join(w.workDir, ".git")
-	if stat, err := os.Stat(gitDir); err != nil || !stat.IsDir() {
-		w.cloneRepo(gs)
-	} else {
-		w.pullRepo(gs)
-	}
-
-	client := github.NewClient(nil)
-	util.Infof("Created new github client %v\n", client)
-
-	//util.Infof("Processing BuildConfig %s\n", name)
-	return 1
-}
-
-func (w *BuildConfigWatch) pullRepo(gs *buildapi.GitBuildSource) error {
-	return nil
-}
-
-func (w *BuildConfigWatch) cloneRepo(gs *buildapi.GitBuildSource) error {
-	// TODO should we check the uri & ref with the .git/config in case we restart and have a PV?
-
-	bc := w.buildConfig
-	name := bc.Name
-
-	uri := gs.URI
-	if len(uri) == 0 {
-		return nil
-	}
-	ref := gs.Ref
-	if len(ref) == 0 {
-		ref = "master"
-	}
-	workDir := w.workDir
-	util.Infof("Cloning repo %s ref %s for BuildConfig %s to \n", uri, ref, name, workDir)
-
-	_, err := git.PlainClone(workDir, false, &git.CloneOptions{
-		URL:      uri,
-		Progress: os.Stdout,
-	})
-	return err
 }
