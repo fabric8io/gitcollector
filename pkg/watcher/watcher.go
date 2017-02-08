@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/fabric8io/gitcollector/pkg/publisher"
 	"github.com/fabric8io/gitcollector/pkg/util"
 	buildapi "github.com/openshift/origin/pkg/build/api"
 	oclient "github.com/openshift/origin/pkg/client"
@@ -33,6 +34,7 @@ type WatchFlags struct {
 type Watcher struct {
 	kubeClient *k8sclient.Client
 	osClient   *oclient.Client
+	publisher  publisher.Publisher
 	watch      *watch.Interface
 	flags      *WatchFlags
 
@@ -43,6 +45,7 @@ type Watcher struct {
 }
 
 func New(c *k8sclient.Client, oc *oclient.Client, flags *WatchFlags) Watcher {
+	pub := publisher.New()
 	workDir := flags.WorkDir
 	err := os.MkdirAll(workDir, 0700)
 	if err != nil {
@@ -51,6 +54,7 @@ func New(c *k8sclient.Client, oc *oclient.Client, flags *WatchFlags) Watcher {
 	return Watcher{
 		kubeClient:      c,
 		osClient:        oc,
+		publisher:       pub,
 		flags:           flags,
 		namespace:       flags.Namespace,
 		workDir:         workDir,
@@ -179,7 +183,7 @@ func (b *Watcher) upsertBuildConfig(bc *buildapi.BuildConfig, add bool) {
 
 	}
 
-	// TODO lets POST to the tracker
+	b.publisher.UpsertBuildConfig(bc)
 }
 
 func (b *Watcher) deleteBuildConfig(bc *buildapi.BuildConfig) {

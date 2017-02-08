@@ -34,8 +34,6 @@ import (
 	"k8s.io/kubernetes/pkg/api"
 )
 
-const ()
-
 var RootCmd = &cobra.Command{
 	Use:   "gitcollector",
 	Short: "gitcollector is a Function as a Service (Lambda) style programming model for Kubernetes",

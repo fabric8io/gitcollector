@@ -75,6 +75,18 @@ func (w *BuildConfigCollector) Process() int {
 }
 
 func (w *BuildConfigCollector) pullRepo(gs *buildapi.GitBuildSource) error {
+	util.Infof("git pull on %s\n", w.name)
+	binaryFile := resolveBinaryLocation("git")
+	args := []string{"pull"}
+	e := exec.Command(binaryFile, args...)
+	e.Dir = w.watcher.workDir
+	e.Stdout = os.Stdout
+	e.Stderr = os.Stderr
+	err := e.Run()
+	if err != nil {
+		util.Errorf("Unable to start git pull %v\n", err)
+		return err
+	}
 	return nil
 }
 
