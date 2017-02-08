@@ -146,6 +146,7 @@ func (b *Watcher) upsertBuildConfig(bc *buildapi.BuildConfig, add bool) {
 	if add {
 		message = "adding"
 	}
+	ns := bc.Namespace
 	name := bc.Name
 	newGS := b.GitSource(bc)
 	if newGS == nil {
@@ -165,7 +166,7 @@ func (b *Watcher) upsertBuildConfig(bc *buildapi.BuildConfig, add bool) {
 			name:        name,
 			watcher:     b,
 			buildConfig: *bc,
-			workDir:     filepath.Join(b.workDir, name),
+			workDir:     filepath.Join(b.workDir, ns, name),
 		}
 		b.collectors = append(b.collectors, buildWatch)
 	} else {
@@ -182,7 +183,6 @@ func (b *Watcher) upsertBuildConfig(bc *buildapi.BuildConfig, add bool) {
 		}
 
 	}
-
 	b.publisher.UpsertBuildConfig(bc)
 }
 

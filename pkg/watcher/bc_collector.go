@@ -11,6 +11,11 @@ import (
 	"srcd.works/go-git.v4/plumbing"
 
 	buildapi "github.com/openshift/origin/pkg/build/api"
+	"io"
+)
+
+const (
+	maxCommits = 10
 )
 
 type BuildConfigCollector struct {
@@ -18,6 +23,9 @@ type BuildConfigCollector struct {
 	workDir     string
 	watcher     *Watcher
 	buildConfig buildapi.BuildConfig
+
+	firstGitHash string
+	lastGitHash  string
 }
 
 // Delete removes the work directory for the given watch
@@ -56,6 +64,12 @@ func (w *BuildConfigCollector) Process() int {
 		}
 	}
 
+	count, err := w.processCommit()
+	if err != nil {
+		util.Warnf("Failed to process commit for %s due to %v\n", name, err)
+		return 0
+	}
+
 	if useGithub {
 		client := github.NewClient(nil)
 		repo, _, err := client.Repositories.Get("fabric8io", "gitcontroller")
@@ -69,9 +83,64 @@ func (w *BuildConfigCollector) Process() int {
 			}
 		}
 	}
+	return count
+}
 
-	//util.Infof("Processing BuildConfig %s\n", name)
-	return 1
+func (w *BuildConfigCollector) processCommit() (int, error) {
+	repo, err := git.PlainOpen(w.workDir)
+	if err != nil {
+		return 0, err
+	}
+	iter, err := repo.Commits()
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	process := true
+	first := true
+	oldestHashLastRun := w.lastGitHash
+	defer iter.Close()
+	for {
+		commit, err := iter.Next()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return 0, err
+		}
+		if commit == nil {
+			break
+		}
+
+		hash := commit.Hash.String()
+		if first {
+			first = false
+			if hash == w.firstGitHash {
+				// are we starting off with the same first hash as last time in which case
+				// lets wait until after we find the last hash before processing again
+				process = false
+			} else if len(w.firstGitHash) == 0 {
+				w.firstGitHash = hash
+			}
+		}
+		if process {
+			util.Infof("Name %s commit %s : %s\n", w.name, commit.Hash, commit.Message)
+			err = w.watcher.publisher.UpsertGitCommit(&w.buildConfig, commit)
+			if err != nil {
+				return count, err
+			}
+			count = count + 1
+			w.lastGitHash = hash
+			if count >= maxCommits {
+				break
+			}
+		}
+		if oldestHashLastRun == hash {
+			// we've now passed all the previously processed commits
+			process = true
+		}
+	}
+	return count, nil
 }
 
 func (w *BuildConfigCollector) pullRepo(gs *buildapi.GitBuildSource) error {
@@ -104,10 +173,11 @@ func (w *BuildConfigCollector) cloneRepo(gs *buildapi.GitBuildSource) error {
 	if len(ref) == 0 {
 		ref = "master"
 	}
+	namespaceDir := filepath.Join(w.watcher.workDir, bc.Namespace)
 	workDir := w.workDir
-	err := os.MkdirAll(workDir, 0700)
+	err := os.MkdirAll(namespaceDir, 0700)
 	if err != nil {
-		return fmt.Errorf("Unable to create work directory %s due to: %v\n", workDir, err)
+		return fmt.Errorf("Unable to create namespace work directory %s due to: %v\n", namespaceDir, err)
 	}
 	util.Infof("Cloning repo %s ref %s for BuildConfig %s to %s\n", uri, ref, name, workDir)
 	if useGoGit {
@@ -139,7 +209,7 @@ func (w *BuildConfigCollector) cloneRepo(gs *buildapi.GitBuildSource) error {
 	binaryFile := resolveBinaryLocation("git")
 	args := []string{"clone", uri, name}
 	e := exec.Command(binaryFile, args...)
-	e.Dir = w.watcher.workDir
+	e.Dir = namespaceDir
 	e.Stdout = os.Stdout
 	e.Stderr = os.Stderr
 	err = e.Run()

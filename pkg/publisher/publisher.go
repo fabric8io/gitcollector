@@ -8,17 +8,34 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"time"
 
 	"github.com/fabric8io/gitcollector/pkg/util"
 	"k8s.io/kubernetes/pkg/api"
 
 	buildapi "github.com/openshift/origin/pkg/build/api"
 	buildapiv1 "github.com/openshift/origin/pkg/build/api/v1"
+	"srcd.works/go-git.v4/plumbing/object"
 )
 
 type Publisher struct {
 	witUrl           string
 	elasticsearchUrl string
+}
+
+type Signature struct {
+	Name  string    `json:"name,omitempty"`
+	Email string    `json:"email,omitempty"`
+	When  time.Time `json:"when,omitempty"`
+}
+
+type BuildConfigCommit struct {
+	Namespace       string    `json:"namespace,omitempty"`
+	BuildConfigName string    `json:"buildConfigName,omitempty"`
+	Hash            string    `json:"hash,omitempty"`
+	Message         string    `json:"message,omitempty"`
+	Author          Signature `json:"author,omitempty"`
+	Committer       Signature `json:"committer,omitempty"`
 }
 
 func New() Publisher {
@@ -104,6 +121,48 @@ func (p *Publisher) putJSON(u string, data *[]byte) error {
 	}
 }
 
+func (p *Publisher) UpsertGitCommit(bc *buildapi.BuildConfig, commit *object.Commit) error {
+	if bc == nil {
+		return fmt.Errorf("No BuildConfig supplied!")
+	}
+	if commit == nil {
+		return fmt.Errorf("No Commit supplied!")
+	}
+	dto := BuildConfigCommit{
+		Namespace:       bc.Namespace,
+		BuildConfigName: bc.Name,
+		Hash:            commit.Hash.String(),
+		Message:         commit.Message,
+		Author:          NewSignature(&commit.Author),
+		Committer:       NewSignature(&commit.Committer),
+	}
+
+	u1 := p.gitCommitURLForWIT(&dto)
+	u2 := p.gitCommitURLForES(&dto)
+	if len(u1) == 0 && len(u2) == 0 {
+		return nil
+	}
+
+	data, err := json.Marshal(&dto)
+	if err != nil {
+		return fmt.Errorf("Failed to marshal BuildConfigCommit to JSON: %v", err)
+	}
+	err = p.putJSON(u1, &data)
+	if err != nil {
+		return err
+	}
+	err = p.putJSON(u2, &data)
+	return err
+}
+
+func NewSignature(sig *object.Signature) Signature {
+	return Signature{
+		Name:  sig.Name,
+		Email: sig.Email,
+		When:  sig.When,
+	}
+}
+
 // buildConfigURLForWIT uses /api/userspace/kubernetes/{namespace}/buildconfigs/{buildConfig}
 func (p *Publisher) buildConfigURLForWIT(bc *buildapi.BuildConfig) string {
 	host := p.witUrl
@@ -120,6 +179,34 @@ func (p *Publisher) buildConfigURLForWIT(bc *buildapi.BuildConfig) string {
 
 // buildConfigURLForES uses /api/userspace/kubernetes/{namespace}/buildconfigs/{buildConfig}
 func (p *Publisher) buildConfigURLForES(bc *buildapi.BuildConfig) string {
+	host := p.elasticsearchUrl
+	if len(host) == 0 {
+		return ""
+	}
+	u, err := url.Parse(host)
+	if err != nil {
+		util.Fatalf("Cannot parse the Elasticsearch URL %s due to: %v\n", host, err)
+	}
+	u.Path = path.Join("/index/foo")
+	return u.String()
+}
+
+// gitCommitURLForWIT uses /api/userspace/git/commits/{namespace}/buildConfig{buildConfigName}/{hash}
+func (p *Publisher) gitCommitURLForWIT(dto *BuildConfigCommit) string {
+	host := p.witUrl
+	if len(host) == 0 {
+		return ""
+	}
+	u, err := url.Parse(host)
+	if err != nil {
+		util.Fatalf("Cannot parse the WIT URL %s due to: %v\n", host, err)
+	}
+	u.Path = path.Join("/api/userspace/git/commits", dto.Namespace, "buildConfig", dto.BuildConfigName, dto.Hash)
+	return u.String()
+}
+
+// gitCommitURLForES uses /api/userspace/git/commits/{namespace}/buildconfigs/{gitCommit}
+func (p *Publisher) gitCommitURLForES(dto *BuildConfigCommit) string {
 	host := p.elasticsearchUrl
 	if len(host) == 0 {
 		return ""
