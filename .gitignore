@@ -1,5 +1,6 @@
 gitcollector
 vendor
+workdir
 /build
 /release
 *.iml
